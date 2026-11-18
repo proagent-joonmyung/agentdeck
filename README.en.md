@@ -14,11 +14,14 @@
 **AI agents, LLM quotas and Mac health, on thirteen buttons on your desk.**<br>
 A macOS dashboard that drives the Ulanzi D200 directly, without the vendor app
 
-[한국어](README.md) · [Guide](docs/GUIDE.en.md) · [Features](#-features) · [Quick start](#-quick-start) · [Contributing](#-contributing)
+[한국어](README.md) · [日本語](README.ja.md) · [中文](README.zh-CN.md) · [Guide](docs/GUIDE.en.md) · [Features](#-features) · [Quick start](#-quick-start) · [Contributing](#-contributing)
 
 <br>
 
 <img src="docs/images/hero.en.gif" alt="Demo" width="85%">
+
+<a href="docs/video/agentdeck-intro.en.mp4"><img src="docs/images/intro-poster.en.png" alt="▶ 40-second intro video (with sound) — click to watch" width="85%"></a><br>
+<sub>▶ 40-second intro video (with sound) — click to watch</sub>
 
 </div>
 
@@ -34,7 +37,8 @@ A macOS dashboard that drives the Ulanzi D200 directly, without the vendor app
 
 ## 🛒 What you need
 
-- **Ulanzi Stream Controller D200**: pick **the cheapest or any seller you like** from the [AliExpress search results](https://www.aliexpress.com/w/wholesale-ulanzi-d200.html). There's also the [Ulanzi store](https://www.ulanzi.com/products/stream-deck-d200).
+- **Ulanzi Stream Controller D200**: get it from the [Ulanzi official store on AliExpress](https://s.click.aliexpress.com/e/_c30mEPxl) (affiliate link¹), or pick **the cheapest or any seller you like** from the [AliExpress search results](https://www.aliexpress.com/w/wholesale-ulanzi-d200.html). There's also the [Ulanzi website](https://www.ulanzi.com/products/stream-deck-d200).
+  - ¹ Affiliate link: if you buy through it, Coldbyte (who makes agentdeck) earns a small commission at no extra cost to you.
   - ⚠️ Make sure the listing really is the **D200**. The similarly named **D200X** (with knobs) and **D200H** are different models and haven't been tested.
 - macOS (Apple Silicon), Python 3.11+
 
@@ -72,7 +76,7 @@ Agent status and running count per project
 <td valign="top">
 
 ### Worktrees
-git worktrees grouped as **stale, mergeable, old, active**. Hold twice to remove a merged worktree or ask the lead agent to tidy up.
+git worktrees grouped as **stale, mergeable, old, active**. Press twice to remove a merged worktree or ask the lead agent to tidy up.
 
 <sub>→ [Guide: worktrees](docs/GUIDE.en.md#43-worktrees)</sub>
 
@@ -95,6 +99,8 @@ CPU, memory, disk and external drives across Macs, with the [Mole](https://githu
 
 ### 5 · Pomodoro
 Ten cells drain **from the last one backwards**. Blinks and sends a macOS notification when time is up.
+
+**Presentation mode** (Home → Present): slide ◀ ▶ (Keynote, PowerPoint, PDF, Google Slides), target-time timer (yellow at 5 min left, red when over), blank screen, lecture recording → [agentnote](https://github.com/jakeparkcolde/agentnote) lecture notes, ★ key-point and Q question marks, demo shortcuts (`presentation.demos` in `config.json`). macOS asks for Accessibility and microphone permission on first use.
 
 <sub>→ [Guide: pomodoro](docs/GUIDE.en.md#45-pomodoro-page-5)</sub>
 
@@ -150,7 +156,7 @@ cp config.example.json config.json
 |---|---|
 | Start at login | `./scripts/install-launchd.sh` |
 | Turn on agent activity (any IDE or terminal) | `python3 scripts/install-hooks.py` |
-| Change on-device language | `"ui_lang": "en"` or `"ko"` in `config.json` |
+| Change language | Follows your macOS language by default (Korean → Korean, anything else → English). To pin it, set `"ui_lang": "en"` or `"ko"` in `config.json` |
 
 New to this? Follow the **[guide](docs/GUIDE.en.md)**, from setup through each feature to troubleshooting.
 
@@ -182,7 +188,7 @@ flowchart LR
 
 > ⚠️ The Codex lookup uses **undocumented internal endpoints**. They may change or stop working at any time. Check the service's terms and use it at your own risk.
 
-agy runs the official read-only CLI command `agy -p /usage --output-format json` over SSH (CLI 1.1.11+). See [Antigravity quota](docs/ANTIGRAVITY.md) for requirements.
+agy runs the official read-only CLI command `agy -p /usage --output-format json` over SSH (CLI 1.1.11+). If the login keeps expiring, install the collector on the agy computer once: `.venv/bin/python remote_agy.py --install`. See [Antigravity quota](docs/ANTIGRAVITY.md) for requirements.
 
 ## 🗺 Roadmap
 

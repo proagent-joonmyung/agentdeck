@@ -14,11 +14,14 @@
 **AI 에이전트, LLM 한도, 맥 상태를 책상 위 13개의 버튼으로.**<br>
 Ulanzi D200을 공식 앱 없이 직접 제어하는 macOS 대시보드
 
-[English](README.en.md) · [사용 가이드](docs/GUIDE.md) · [기능](#-기능) · [빠른 시작](#-빠른-시작) · [기여하기](#-기여하기)
+[English](README.en.md) · [日本語](README.ja.md) · [中文](README.zh-CN.md) · [사용 가이드](docs/GUIDE.md) · [기능](#-기능) · [빠른 시작](#-빠른-시작) · [기여하기](#-기여하기)
 
 <br>
 
 <img src="docs/images/hero.gif" alt="데모" width="85%">
+
+<a href="docs/video/agentdeck-intro.mp4"><img src="docs/images/intro-poster.png" alt="▶ 소개 영상 40초 (소리 있음) — 눌러서 보기" width="85%"></a><br>
+<sub>▶ 소개 영상 40초 (소리 있음) — 눌러서 보기</sub>
 
 </div>
 
@@ -34,7 +37,8 @@ Ulanzi D200을 공식 앱 없이 직접 제어하는 macOS 대시보드
 
 ## 🛒 준비물
 
-- **Ulanzi Stream Controller D200**: [알리익스프레스 검색 결과](https://ko.aliexpress.com/w/wholesale-ulanzi-%EC%8A%A4%ED%8A%B8%EB%A6%BC%EB%8D%B1.html)에서 **최저가나 마음에 드는 판매처**를 골라 사면 돼요. [Ulanzi 공식 스토어](https://www.ulanzi.com/products/stream-deck-d200)도 있어요.
+- **Ulanzi Stream Controller D200**: [알리익스프레스 Ulanzi 공식 스토어](https://s.click.aliexpress.com/e/_c30mEPxl)(제휴 링크¹)에서 사거나, [알리익스프레스 검색 결과](https://ko.aliexpress.com/w/wholesale-ulanzi-%EC%8A%A4%ED%8A%B8%EB%A6%BC%EB%8D%B1.html)에서 **최저가나 마음에 드는 판매처**를 골라도 돼요. [Ulanzi 공식 홈페이지](https://www.ulanzi.com/products/stream-deck-d200)도 있어요.
+  - ¹ 제휴 링크예요. 이 링크로 사시면 agentdeck을 만드는 콜드바이트가 소정의 수수료를 받고, 가격은 똑같아요.
   - ⚠️ 상품명에 **D200**이 맞는지 꼭 확인하세요. 이름이 비슷한 **D200X**(노브 포함)와 **D200H**는 다른 모델이라 동작을 확인하지 않았어요.
 - macOS(Apple Silicon), Python 3.11 이상
 
@@ -72,7 +76,7 @@ Claude · Codex · agy의 **5시간 / 주간 남은 한도**(선택: Google Flow
 <td valign="top">
 
 ### 워크트리
-git 워크트리를 **방치 · 정리 가능 · 오래됨 · 작업 중**으로 분류. 길게 두 번 누르면 머지된 워크트리를 삭제하거나 리드 에이전트에게 정리를 요청해요.
+git 워크트리를 **방치 · 정리 가능 · 오래됨 · 작업 중**으로 분류. 두 번 누르면 머지된 워크트리를 삭제하거나 리드 에이전트에게 정리를 요청해요.
 
 <sub>→ [가이드: 워크트리](docs/GUIDE.md#43-워크트리)</sub>
 
@@ -95,6 +99,8 @@ git 워크트리를 **방치 · 정리 가능 · 오래됨 · 작업 중**으로
 
 ### 5 · 뽀모도로
 칸 10개가 **마지막 칸부터 거꾸로** 비워지는 타이머. 끝나면 깜빡임과 맥 알림으로 알려줘요.
+
+**발표 모드** (홈 → 발표): 슬라이드 ◀ ▶ (키노트·파워포인트·PDF·구글 슬라이드), 목표 시간 타이머(5분 전 노랑·초과 빨강), 화면 가리기, 강의 녹음 → [agentnote](https://github.com/jakeparkcolde/agentnote) 강의 노트, ★ 중요·Q 질문 시점 표시, 시연 바로가기(`config.json` 의 `presentation.demos`). 처음 쓸 때 macOS 가 손쉬운 사용·마이크 권한을 물어요.
 
 <sub>→ [가이드: 뽀모도로](docs/GUIDE.md#45-뽀모도로-5페이지)</sub>
 
@@ -150,7 +156,7 @@ cp config.example.json config.json
 |---|---|
 | 로그인할 때 자동 실행 | `./scripts/install-launchd.sh` |
 | 에이전트 현황 켜기 (IDE·터미널 상관없음) | `python3 scripts/install-hooks.py` |
-| 화면 언어 바꾸기 | `config.json`의 `"ui_lang": "ko"` 또는 `"en"` |
+| 화면 언어 바꾸기 | 기본은 맥 시스템 언어(한국어면 한국어, 그 밖엔 영어). 고정하려면 `config.json`의 `"ui_lang": "ko"` 또는 `"en"` |
 
 처음이라면 **[사용 가이드](docs/GUIDE.md)**를 따라 하세요. 준비부터 기능별 설정, 문제 해결까지 순서대로 정리돼 있어요.
 
@@ -182,7 +188,7 @@ flowchart LR
 
 > ⚠️ Codex 한도 조회는 **공식 문서가 없는 내부 API**를 씁니다. 언제든 바뀌거나 막힐 수 있으니, 각 서비스 약관을 확인하고 본인 책임 아래 사용하세요.
 
-agy는 SSH로 공식 CLI의 읽기 전용 명령 `agy -p /usage --output-format json`을 실행해요(CLI 1.1.11 이상). 자세한 조건은 [Antigravity 한도 안내](docs/ANTIGRAVITY.md)를 보세요.
+agy는 SSH로 공식 CLI의 읽기 전용 명령 `agy -p /usage --output-format json`을 실행해요(CLI 1.1.11 이상). 로그인이 자꾸 풀리면 agy 컴퓨터에 수집기를 한 번 설치하세요: `.venv/bin/python remote_agy.py --install`. 자세한 조건은 [Antigravity 한도 안내](docs/ANTIGRAVITY.md)를 보세요.
 
 ## 🗺 로드맵
 

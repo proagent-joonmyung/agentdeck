@@ -208,16 +208,16 @@ If you manage agents with [Herdr](https://herdr.dev), this mode gives you more:
 
 **Press the wide tile on page 3** to open it. Git worktrees grouped by state:
 
-| State | Meaning | Hold twice to |
+| State | Meaning | Press twice to |
 |---|---|---|
 | Stale | Uncommitted changes and nobody working on it | Ask the lead agent to tidy up |
 | Mergeable | Fully merged into main, no changes | Remove the worktree (branch is kept) |
 | Old | Unmerged commits, untouched for 3+ days | Ask to tidy up |
 | Working | An agent is working in that folder | Ask to tidy up |
 
-- **Tap** to open the worktree.
-- **Hold once to arm (red), then hold again within 10 seconds to run.** This prevents accidental deletes.
-- To enable, set `studio.host` (where the worktrees live) and `studio.worktree_globs` (where to look). Cleanup requests go to `studio.lead_pane`, which currently needs Herdr.
+- **Press once to arm (red), then press again within 10 seconds to run.** This prevents accidental deletes.
+- **Hold** to open the worktree in Herdr.
+- To enable, set `studio.host` (where the worktrees live) and `studio.worktree_globs` (where to look). Cleanup requests go to a live session, in order: an agent running in that repo's folder → `studio.cleanup_lead` (by name, default `worktree-lead-claude`) → `studio.lead_pane`. If every session is closed, a new Claude Code session is started in that repo to handle it. This currently needs Herdr.
 
 ### 4.4 Machines and device detail (page 4)
 
@@ -355,7 +355,7 @@ Everything lives in `config.json`. **Anything you leave out is turned off.** Res
 
 ```jsonc
 {
-  "ui_lang": "en",              // on-device language: "en" or "ko"
+  "ui_lang": "auto",            // device & terminal language: "auto" (follows macOS), "en", "ko"
   "screensaver_min": 10,        // idle minutes before the screensaver (0 = off)
   "screensaver_scene": "aqua",  // screensaver scene: aqua · fire · rain · beach, or alternate
   "sound": {"enabled": false, "volume": 0.6},  // sound effects and ambience on the Mac speaker

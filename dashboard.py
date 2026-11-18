@@ -26,10 +26,12 @@ from aquarium import Aquarium
 from games import Games
 
 from config import CFG
+from i18n import t
 import parcels
 import parcels_import
 import web_credits
 import updater
+import present
 import intro
 from sfx import ambient, play
 from fireplace import Fireplace
@@ -40,6 +42,7 @@ from worktrees import Worktree, ask_tower, open_in_herdr, remove_worktree, workt
 from pomodoro import PRESETS, Pomodoro, notify_done
 from remote_agy import HOST as AGY_HOST
 from remote_agy import agy_quota
+import remote_agy
 from remote_herdr import (TOWER_SPACE, StudioState, TowerMeta, Workspace, alert_keys, apply_ack, focus,
                           studio_state, tower_meta, tower_split, unzoom_pane, zoom_pane)
 from usage import claude_usage, codex_live, codex_usage
@@ -63,6 +66,7 @@ AQUA_PAGE = PAGES  # 어항 (넘김 순서 마지막, 화면보호기로도 사�
 GAME_TICK = 0.05
 AQUA_FPS = 5
 WT_PAGE = 16  # 워크트리: 작업 현황 넓은 칸에서 들어가는 하위 페이지 (넘김 순서 밖)
+PRES_PAGE = 18  # 발표 모드: 홈 바로가기로 들어가는 하위 페이지 (넘김 순서 밖)
 DEV_PAGE = 17  # 기기 상세: 머신 페이지에서 컴퓨터를 눌러 들어가는 하위 페이지
 WT_POLL_SEC = 60
 ARM_SEC = 10  # 길게 한 번 누른 뒤 확인 대기 시간
@@ -98,7 +102,7 @@ def collect_llms(pool: ThreadPoolExecutor) -> list[LLM]:
         out.append(codex)
     if not AGY_HOST:  # agy 주소를 설정하지 않았으면 표시 안 함
         return out
-    agy = LLM("AGY", "#7aa2f7")
+    agy = LLM("AGY", "#7aa2f7", login=ag is None and remote_agy.login_needed)
     for b in ag or []:  # 모델 그룹이 여럿이면 창마다 가장 빠듯한(남은 게 적은) 그룹을 보여준다
         if b.window == "5h" and (agy.five is None or b.remaining < agy.five.remaining):
             agy.five = Limit(b.remaining, b.reset, W5)
@@ -165,6 +169,9 @@ class Dashboard:
         self.home_fresh = False
         self.home_note_page = 0
         self.home_extra: list[tuple[int, str, str, str, str]] = []
+        self.home_more = False  # 홈 바로가기가 10개를 넘으면 둘째 화면
+        self.pres = present.Presenter()
+        self.pres_app = ""  # 발표 화면에 보여줄 맨 앞 앱 이름
         self.home_pick = False  # 홈에서 어항을 눌렀을 때: 물멍/불멍 고르기  # 선택 기능이 홈에 추가하는 바로가기
         self.parcels: list = []  # 택배 목록 (parcels.Parcel)
         self.parcels_at = 0.0
@@ -249,6 +256,19 @@ class Dashboard:
         elif self.page == WT_PAGE and ev.index in (10, 12):  # 워크트리 → 뒤로(작업 현황) / 다음(머신)
             self.page = 3 if ev.index == 10 else 4
             self.render()
+        elif self.page == PRES_PAGE and ev.index in (10, 12):  # 발표 화면 ◀ ▶ = 홈으로 (발표는 계속)
+            self.go_page(HOME_PAGE)
+        elif self.page == PRES_PAGE and (ev.index < 10 or ev.index >= 13):
+            present.press(self.pres, ev.index, held, LONG_PRESS, on_uploaded=lambda ok, text: self.render())
+            self.pres_app = present.front_app() if ev.index in (0, 1, 2) else self.pres_app
+            self.render()
+        elif self.page in (1, 2) and held >= LONG_PRESS and self.login_llm(ev.index):
+            # 로그인이 풀린 LLM 칸 길게: 터미널을 열어 사용자가 직접 로그인
+            if remote_agy.via_collector:  # 수집기는 그 컴퓨터의 평소 로그인을 쓴다: SSH 로그인으로는 안 풀림
+                self.toast("AGY", ["agy 컴퓨터에서", "agy 로그인"], "#7aa2f7", 6)
+            else:
+                ok = remote_agy.open_login()
+                self.toast("AGY", ["터미널에서 로그인", "끝나면 agy 종료"] if ok else ["터미널을 못 열었어요"], "#7aa2f7", 6)
         elif ev.index == 10:
             self.page = PAGES if self.page in (HOME_PAGE, 1) else self.page - 1
             if self.page == AQUA_PAGE:
@@ -289,7 +309,10 @@ class Dashboard:
                     self.render()
             elif ev.index < len(items):
                 pg = items[ev.index][0]
-                if pg == AQUA_PAGE:
+                if pg < 0:  # 더보기 / 처음으로
+                    self.home_more = pg == -1
+                    self.render()
+                elif pg == AQUA_PAGE:
                     self.home_pick = True
                     self.render()
                 else:
@@ -342,6 +365,15 @@ class Dashboard:
         if page == ROUND_PAGE:
             self.pool.submit(self.refresh_rounds)
 
+    def login_llm(self, idx: int) -> bool:
+        """요약(1페이지)·한도(2페이지)에서 idx 칸이 '로그인 필요' 상태인 LLM 칸인지."""
+        if idx >= 10:
+            return False
+        col = idx % 5
+        if self.page == 1 and col >= 3:
+            return False
+        return col < len(self.llms) and self.llms[col].login
+
     def home_items(self) -> list[tuple[int, str, str, str, str]]:
         """(페이지, 이름, 설명, 아이콘, 색)"""
         items = [(1, "요약", "한도·작업", "chart", "#7aa2f7"), (2, "한도", "LLM 상세", "hourglass", "#bb9af7"),
@@ -353,7 +385,12 @@ class Dashboard:
         if ROUND_ON:
             items.append((ROUND_PAGE, "라운드", "하네스", "gear", "#9ece6a"))
         items.append((AQUA_PAGE, "어항", "물멍 · 불멍 · 비 · 바다", "fish", "#7dcfff"))
-        return (items + self.home_extra)[:10]
+        items.append((PRES_PAGE, "발표", "슬라이드 · 타이머 · 녹음", "bell", "#e0af68"))
+        items += self.home_extra
+        if len(items) <= 10:
+            return items
+        more, back = (-1, "더보기", "다음 바로가기", "sparkle", "#565f89"), (-2, "처음으로", "첫 바로가기", "home", "#565f89")
+        return items[9:] + [back] if self.home_more else items[:9] + [more]
 
     def render_home(self) -> None:
         if self.home_pick:  # 물멍 / 불멍 고르기: 세로 두 칸짜리 큰 단추 두 개
@@ -502,7 +539,7 @@ class Dashboard:
                 got.append(f"{name}={st.health}")
                 refresh_dryrun(host)  # 정리 가능 용량: 6시간마다 백그라운드 측정 (상세 페이지를 안 열어도)
         self.mole_at = time.time()
-        print(f"{datetime.now():%H:%M:%S} mole: {' '.join(got) or '응답 없음'}", flush=True)
+        print(f"{datetime.now():%H:%M:%S} mole: {' '.join(got) or 'no response'}", flush=True)
         if self.page in (4, DEV_PAGE):
             self.render()
 
@@ -582,25 +619,26 @@ class Dashboard:
         if idx >= len(items):
             return
         w = items[idx]
-        if held < LONG_PRESS:  # 짧게: Herdr 에서 열기
+        if held >= LONG_PRESS:  # 길게: Herdr 에서 열기 (짧게 = 정리, 한 번 더 누르면 실행)
             self.wt_armed = None
             tower = next((x for x in self.raw_studio.workspaces if x.name == TOWER_SPACE), None)
             self.pool.submit(open_in_herdr, w, tower.space_id if tower else None)
             return
         action = "remove" if w.can_remove else "ask"
         path, armed_action = self.armed_now()
-        if path != w.path:  # 길게 첫 번째: 확인 대기
+        if path != w.path:  # 첫 번째: 확인 대기
             self.wt_armed = (w.path, action, time.time() + ARM_SEC)
             what = "워크트리 삭제 (브랜치는 유지)" if action == "remove" else "리드 에이전트에게 정리 요청 전송"
-            self.toast("확인 필요", [f"{w.repo}/{w.name}", what, f"{ARM_SEC}초 안에 길게 한 번 더"], "#f7768e", ARM_SEC)
+            self.toast("확인 필요", [f"{w.repo}/{w.name}", what, f"{ARM_SEC}초 안에 한 번 더 누르면 실행"], "#f7768e", ARM_SEC)
             return
-        self.wt_armed = None  # 길게 두 번째: 실행
+        self.wt_armed = None  # 두 번째: 실행
         self.toast("실행 중…", [f"{w.repo}/{w.name}"], "#e0af68", 30)
 
         def run() -> None:
             ok, out = remove_worktree(w) if armed_action == "remove" else ask_tower(w)
-            done = "삭제 완료" if armed_action == "remove" else "총괄에게 전송함"
-            self.toast(done if ok else "실패", [f"{w.repo}/{w.name}", out[:40]] if not ok else [f"{w.repo}/{w.name}"],
+            done = "삭제 완료" if armed_action == "remove" else "정리 요청함"
+            self.toast(done if ok else "실패", [f"{w.repo}/{w.name}", out[:40]] if (not ok or armed_action != "remove")
+                       else [f"{w.repo}/{w.name}"],
                        "#9ece6a" if ok else "#f7768e")
             self.refresh_worktrees()
 
@@ -811,6 +849,15 @@ class Dashboard:
         if self.page == GAME_PAGE:
             self.render_game()
             return
+        if self.page == PRES_PAGE:
+            with self.render_lock:
+                navs = nav(self.page, PAGES, self.brightness, ("발표", "◀ ▶ 홈으로"))
+                navs[11] = Button(header="발표", title="홈", sub="◀ ▶ 홈으로", bg="#24283b", accent="#565f89")
+                try:
+                    self.deck.set_buttons({**present.page(self.pres), **navs}, small_png=present.wide(self.pres, self.pres_app))
+                except Exception as e:
+                    print(f"{datetime.now():%H:%M:%S} present render error: {e}", flush=True)
+            return
         with self.render_lock:
             now = datetime.now(timezone.utc)
             if self.page == AQUA_PAGE:
@@ -873,9 +920,9 @@ class Dashboard:
                     if self.wt_msg and time.time() < self.wt_msg[3]:
                         small = render_message(*self.wt_msg[:3])
                     else:
-                        small = render_message("워크트리", ["짧게: Herdr 에서 열기",
-                                                         "길게 2번: 정리 가능 → 삭제",
-                                                         "길게 2번: 그 외 → 총괄에 정리 요청"])
+                        small = render_message("워크트리", ["누르기 2번: 정리 가능 → 삭제",
+                                                         "누르기 2번: 그 외 → 총괄에 정리 요청",
+                                                         "길게: Herdr 에서 열기"])
                 elif self.wt_msg and time.time() < self.wt_msg[3]:  # 알림(업데이트 등)이 있으면 잠깐 대신 표시
                     small = render_message(*self.wt_msg[:3])
                 else:
@@ -932,7 +979,7 @@ class Dashboard:
         self.deck.start()
         self.deck.set_brightness(self.brightness)
         self.deck.set_small_window(mode=SMALL_BACKGROUND)  # 넓은 칸 = 커스텀 시계 이미지
-        print("D200 대시보드 시작 (Ctrl+C 종료)", flush=True)
+        print(t("D200 대시보드 시작 (Ctrl+C 로 종료)", "D200 dashboard started (Ctrl+C to quit)"), flush=True)
         updater.start_background()
         self.play_intro()
         self.deck.set_brightness(self.brightness)  # 연결 직후 한 번은 장치가 무시할 때가 있어 다시 보낸다
@@ -954,6 +1001,8 @@ class Dashboard:
                     self.page, dirty = 5, True
                 if self.page == 5 and self.pomo.state == "running":
                     dirty = True  # 매초 남은 시간·칸 갱신
+                if self.page == PRES_PAGE and (self.pres.active() or self.pres.msg):
+                    dirty = True  # 발표 타이머·녹음 시간 매초 갱신
                 if (self.page == 5 and self.pomo.state == "done") or \
                         ((self.studio.attention or self.studio.done) and self.page in (1, 3)) or \
                         (self.page == ROUND_PAGE and any(r.attention for r in self.rounds)):
@@ -968,7 +1017,8 @@ class Dashboard:
                     continue
                 if self.page == GAME_PAGE and self.games.active:
                     continue  # 게임 중엔 화면보호기·주기 갱신 없음
-                if self.saver_sec and not alert and time.time() - self.last_input > self.saver_sec:
+                if self.saver_sec and not alert and not self.pres.active() \
+                        and time.time() - self.last_input > self.saver_sec:  # 발표 중엔 화면보호기 없음
                     self.enter_aquarium(saver=True)
                     continue
                 # 워크트리: 확인 대기·결과 메시지가 만료되면 원래 화면으로
@@ -983,7 +1033,7 @@ class Dashboard:
             self.fetch_now.clear()
         self.deck.close()
         if self.deck.disconnected.is_set():
-            print(f"{datetime.now():%H:%M:%S} 장치 연결 끊김, 종료", flush=True)
+            print(f"{datetime.now():%H:%M:%S} device disconnected, exiting", flush=True)
             raise SystemExit(1)  # launchd KeepAlive 가 재시작
 
 

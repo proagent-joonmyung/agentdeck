@@ -1,5 +1,5 @@
 {
-  "ui_lang": "en",
+  "ui_lang": "auto",
   "agent_source": "hooks",
   "hooks": {
     "hosts": [
@@ -42,6 +42,13 @@
   "agy": {
     "enabled": false,
     "host": "studio-host"
+  },
+  "presentation": {
+    "mic": null,
+    "save_dir": "~/Movies/agentdeck",
+    "demos": [
+      {"name": "Demo site", "open": "https://example.com"}
+    ]
   },
   "market": {
     "enabled": true,

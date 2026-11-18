@@ -21,11 +21,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import time
 import shlex
 import subprocess
 from dataclasses import dataclass
 
-from config import LEAD_PANE, STUDIO_ENABLED, STUDIO_HOST, WORKTREE_GLOBS
+from config import LEAD_PANE, STUDIO, STUDIO_ENABLED, STUDIO_HOST, WORKTREE_GLOBS
+from i18n import t
 
 HOST = STUDIO_HOST
 HERDR_APP = os.path.expanduser("~/.local/bin/herdr-app")
@@ -107,7 +110,9 @@ class Worktree:
     def age_text(self) -> str:
         if self.age_h is None:
             return "-"
-        return f"{self.age_h / 24:.0f}일" if self.age_h >= 48 else f"{self.age_h:.0f}시간"
+        if self.age_h >= 48:
+            return t(f"{self.age_h / 24:.0f}일", f"{self.age_h / 24:.0f}d")
+        return t(f"{self.age_h:.0f}시간", f"{self.age_h:.0f}h")
 
 
 ORDER = {"방치": 0, "정리 가능": 1, "오래됨": 2, "작업": 3, "정상": 4}
@@ -148,21 +153,70 @@ def open_in_herdr(w: Worktree, space_id: str | None) -> bool:
 
 def remove_worktree(w: Worktree) -> tuple[bool, str]:
     if not w.can_remove:
-        return False, "정리 가능 상태가 아님"
+        return False, t("정리 가능 상태가 아님", "not ready to remove")
     # main 저장소에서 제거 (강제 아님: 변경이 있으면 git 이 거부)
     r = _ssh(f"git -C {shlex.quote(w.path)} worktree remove {shlex.quote(w.path)}")
     return r.returncode == 0, (r.stderr or r.stdout).strip()[:200]
 
 
+CLEANUP_LEAD = STUDIO.get("cleanup_lead", "worktree-lead-claude")  # 저장소 담당이 없을 때 받을 에이전트 이름
+AGENT_KINDS = ("claude-code", "codex", "antigravity")
+
+
+def pick_target(terms: list[dict], repo_root: str, repo_name: str, lead_name: str = "", lead_addr: str = "") -> dict | None:
+    """정리 요청을 받을 살아 있는 에이전트: 그 저장소 폴더의 에이전트 > 정리 담당(이름) > 설정의 고정 주소.
+    같은 순위면 일하는 중이 아닌 쪽. 다른 컴퓨터(주소에 '/')의 터미널은 고르지 않는다 (워크트리는 이 컴퓨터에 있음)."""
+    live = [t for t in terms if t.get("state") == "live" and t.get("agent") in AGENT_KINDS and "/" not in t.get("address", "")]
+
+    def same_repo(t: dict) -> bool:
+        cwd = (t.get("cwd") or "").rstrip("/")
+        return bool(cwd) and (cwd == repo_root.rstrip("/") or cwd.rsplit("/", 1)[-1] == repo_name)
+
+    for group in ([t for t in live if same_repo(t)], [t for t in live if lead_name and t.get("name") == lead_name],
+                  [t for t in live if lead_addr and t.get("address") == lead_addr]):
+        if group:
+            return next((t for t in group if t.get("status") != "working"), group[0])
+    return None
+
+
+def _label(t: dict) -> str:
+    where = (t.get("where") or "").split(" / ")[-1]
+    return f"{where or t.get('name') or t['address']}({t['address']})"
+
+
 def ask_tower(w: Worktree) -> tuple[bool, str]:
-    msg = (f"[D200 워크트리 정리 요청] {w.path} (브랜치 {w.branch}, 커밋 안 한 변경 {w.dirty}개, "
-           f"기준 {w.base or '없음'} 대비 앞선 커밋 {w.ahead if w.ahead is not None else '?'}개, "
-           f"마지막 커밋 {w.age_text()} 전). 상태를 확인하고 필요한 커밋·머지·정리를 진행해줘. "
-           f"삭제나 되돌릴 수 없는 작업은 실행 전에 나에게 먼저 확인받아줘.")
-    r = _ssh(f"herdr-core send {LEAD_PANE} {shlex.quote(msg)}")
-    return r.returncode == 0, (r.stderr or r.stdout).strip()[:200]
+    ahead = w.ahead if w.ahead is not None else "?"
+    msg = t(f"[D200 워크트리 정리 요청] {w.path} (브랜치 {w.branch}, 커밋 안 한 변경 {w.dirty}개, "
+            f"기준 {w.base or '없음'} 대비 앞선 커밋 {ahead}개, "
+            f"마지막 커밋 {w.age_text()} 전). 상태를 확인하고 필요한 커밋·머지·정리를 진행해줘. "
+            f"삭제나 되돌릴 수 없는 작업은 실행 전에 나에게 먼저 확인받아줘.",
+            f"[D200 worktree cleanup request] {w.path} (branch {w.branch}, {w.dirty} uncommitted changes, "
+            f"{ahead} commits ahead of {w.base or 'none'}, "
+            f"last commit {w.age_text()} ago). Check its state and do the needed commit/merge/cleanup. "
+            f"Ask me before anything that deletes data or can't be undone.")
+    root = _ssh(f"git -C {shlex.quote(w.path)} rev-parse --path-format=absolute --git-common-dir").stdout.strip()
+    root = root[:-5] if root.endswith("/.git") else w.path  # 원래 저장소 폴더 (못 찾으면 워크트리 폴더)
+    try:
+        terms = json.loads(_ssh("herdr-core ls --json").stdout).get("terminals", [])
+    except (ValueError, AttributeError):
+        terms = []
+    target = pick_target(terms, root, w.repo, CLEANUP_LEAD, LEAD_PANE)
+    if target:  # 살아 있는 담당 에이전트에게 보낸다
+        r = _ssh(f"herdr-core send {shlex.quote(target['address'])} {shlex.quote(msg)}")
+        return r.returncode == 0, (t(f"{_label(target)} 에게 보냄", f"sent to {_label(target)}") if r.returncode == 0
+                                   else (r.stderr or r.stdout).strip()[:200])
+    # 받을 세션이 모두 닫혀 있으면: 그 저장소에서 새 Claude Code 세션을 띄워 같은 요청을 맡긴다
+    name = "wt-cleanup-" + re.sub(r"[^a-z0-9_-]", "-", w.name.lower())[:18] + time.strftime("-%H%M")
+    r = _ssh(f"herdr-core run --bg --no-parent --json --name {shlex.quote(name)} --cwd {shlex.quote(root)} "
+             f"--label purpose=wt-cleanup -- claude {shlex.quote(msg)}")
+    try:
+        addr = json.loads(r.stdout).get("address", name)
+    except ValueError:
+        addr = name
+    return r.returncode == 0, (t(f"새 세션 {addr} 에서 정리 시작", f"started new session {addr}") if r.returncode == 0
+                               else (r.stderr or r.stdout).strip()[:200])
 
 
 if __name__ == "__main__":
     for w in worktrees() or []:
-        print(f"{w.state:6} {w.repo}/{w.name} [{w.branch}] 변경 {w.dirty} 앞섬 {w.ahead} ({w.base}) {w.age_text()} 에이전트 {len(w.agents)}")
+        print(f"{w.state:6} {w.repo}/{w.name} [{w.branch}] dirty {w.dirty} ahead {w.ahead} ({w.base}) {w.age_text()} agents {len(w.agents)}")
