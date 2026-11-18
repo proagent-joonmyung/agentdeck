@@ -19,7 +19,8 @@ from clock import render_clock, render_market, render_message, render_timer, ren
 from d200 import D200, SMALL_BACKGROUND, Button, InputEvent
 from machines import MachineStat, machine_stats
 from pages import (LLM, Limit, nav, nav_device, nav_worktrees, page_device, page_grid, page_machines, page_pomodoro,
-                   page_market, page_studio, page_summary, page_worktrees)
+                   page_market, page_round, page_studio, page_summary, page_worktrees)
+import round_status
 import market
 from aquarium import Aquarium
 from games import Games
@@ -53,9 +54,11 @@ PARCELS_ON = bool((CFG.get("parcels") or {}).get("enabled"))  # 택배(해외 �
 # 웹으로만 보이는 크레딧 (한도 표에서 LLM 다음 열): 이름, 색
 WEB_CREDITS = [(k, n, c) for k, n, c in (("flow", "FLOW", "#4285f4"), ("higgsfield", "HIGGS", "#c6f432"))
                if (CFG.get(k) or {}).get("enabled")]
-PAGES = 9 if PARCELS_ON else 8
+ROUND_ON = bool((CFG.get("round") or {}).get("projects"))  # 라운드 하네스 페이지 (round.projects 가 있으면)
+PAGES = 8 + PARCELS_ON + ROUND_ON
 GAME_PAGE = 7  # 게임: 두더지 잡기 · 순서 기억
 PARCEL_PAGE = 8 if PARCELS_ON else -1  # 택배 (게임 다음)
+ROUND_PAGE = 8 + PARCELS_ON if ROUND_ON else -1  # 라운드 하네스 (택배 다음)
 AQUA_PAGE = PAGES  # 어항 (넘김 순서 마지막, 화면보호기로도 사용)
 GAME_TICK = 0.05
 AQUA_FPS = 5
@@ -125,7 +128,7 @@ class Dashboard:
         self.deck.on_event = self.on_event
         self.pool = LoggingPool(max_workers=8)
         self.page = 1
-        self.brightness_idx = 2
+        self.brightness_idx = 3  # 기본 100%
         self.llms: list[LLM] = []
         self.studio = StudioState(False, [])
         self.pressed_at: dict[int, float] = {}
@@ -134,6 +137,7 @@ class Dashboard:
         self.render_lock = threading.Lock()
         self.rendered_minute = ""
         self.blink_on = False
+        self.rounds: list = []
         self.machines: list[MachineStat] = []
         self.machines_at = 0.0
         self.raw_studio = StudioState(False, [])  # Herdr 원본 상태
@@ -226,7 +230,7 @@ class Dashboard:
             self.render()
             return
         if self.page == AQUA_PAGE:  # 어항: 짧게 = 먹이, 길게 = 나가기
-            if held >= LONG_PRESS:
+            if held >= LONG_PRESS or ev.index == 11:  # 가운데(다른 페이지의 홈 자리)는 짧게도 나가기
                 self.leave_aquarium()
             else:
                 self.scene().feed(ev.index if ev.index < 13 else 13)
@@ -335,6 +339,8 @@ class Dashboard:
             self.pool.submit(self.refresh_market)
         if page == WT_PAGE:
             self.pool.submit(self.refresh_worktrees)
+        if page == ROUND_PAGE:
+            self.pool.submit(self.refresh_rounds)
 
     def home_items(self) -> list[tuple[int, str, str, str, str]]:
         """(페이지, 이름, 설명, 아이콘, 색)"""
@@ -344,6 +350,8 @@ class Dashboard:
                  (GAME_PAGE, "게임", "8종", "gamepad", "#ff9e64")]
         if PARCELS_ON:
             items.append((PARCEL_PAGE, "택배", "도착 예상", "parcel", "#ff9e64"))
+        if ROUND_ON:
+            items.append((ROUND_PAGE, "라운드", "하네스", "gear", "#9ece6a"))
         items.append((AQUA_PAGE, "어항", "물멍 · 불멍 · 비 · 바다", "fish", "#7dcfff"))
         return (items + self.home_extra)[:10]
 
@@ -403,6 +411,11 @@ class Dashboard:
         self.page = HOME_PAGE
         intro.mark_seen()  # 다음에 켤 때는 이번 이후 바뀐 것만 '새로 바뀐 것'으로
         self.render()
+
+    def refresh_rounds(self) -> None:
+        self.rounds = round_status.collect()
+        if self.page == ROUND_PAGE:
+            self.render()
 
     # ---- 택배 ----
     def refresh_parcels(self, force: bool = False) -> None:
@@ -836,6 +849,8 @@ class Dashboard:
                 armed = self.dev_armed[1] if self.dev_armed and self.dev_armed[0] == name and time.time() < self.dev_armed[2] else None
                 body = page_device(m, self.mole.get(name), dryrun_info(host) if host else {}, self.trash.get(name), armed) \
                     if m else {}
+            elif self.page == ROUND_PAGE:
+                body = page_round(self.rounds, {h or "local": n for n, h in MACHINES}, self.blink_on)
             else:
                 body = page_worktrees(self.wts, *self.armed_now())
             try:
@@ -884,6 +899,8 @@ class Dashboard:
             if time.time() - self.machines_at >= MACHINE_POLL_SEC or self.page == 4:
                 self.machines = machine_stats(self.pool)
                 self.machines_at = time.time()
+            if ROUND_ON:
+                self.pool.submit(self.refresh_rounds)
             if time.time() - self.wts_at >= WT_POLL_SEC:
                 self.pool.submit(self.refresh_worktrees)
             if self.page == 6:
@@ -918,6 +935,7 @@ class Dashboard:
         print("D200 대시보드 시작 (Ctrl+C 종료)", flush=True)
         updater.start_background()
         self.play_intro()
+        self.deck.set_brightness(self.brightness)  # 연결 직후 한 번은 장치가 무시할 때가 있어 다시 보낸다
         while not self.stop.is_set() and not self.deck.disconnected.is_set():
             self.fetch()
             self.render()
@@ -937,7 +955,8 @@ class Dashboard:
                 if self.page == 5 and self.pomo.state == "running":
                     dirty = True  # 매초 남은 시간·칸 갱신
                 if (self.page == 5 and self.pomo.state == "done") or \
-                        ((self.studio.attention or self.studio.done) and self.page in (1, 3)):
+                        ((self.studio.attention or self.studio.done) and self.page in (1, 3)) or \
+                        (self.page == ROUND_PAGE and any(r.attention for r in self.rounds)):
                     self.blink_on, dirty = not self.blink_on, True
                 elif self.blink_on:
                     self.blink_on, dirty = False, True

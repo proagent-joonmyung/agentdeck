@@ -63,7 +63,7 @@ def codex(install: bool) -> None:
         return
     text = open(CODEX_CONFIG).read()
     m = re.search(r"^notify\s*=\s*(\[.*?\])\s*$", text, re.M | re.S)
-    current = json.loads(m.group(1)) if m else None
+    current = json.loads(re.sub(r",\s*]$", "]", m.group(1))) if m else None  # TOML 은 끝 쉼표 허용
     ours = ["python3", HOOK, "codex", "--"]
     if current and len(current) >= 4 and current[1].endswith("agent_hook.py"):
         original = current[4:]  # 이미 우리 래퍼: 원래 명령만 꺼냄

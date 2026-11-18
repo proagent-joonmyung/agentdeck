@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import subprocess
 
@@ -21,8 +22,15 @@ STALE_SEC = 24 * 3600
 
 # 원격(또는 로컬)에서 실행: 살아 있는 세션만 JSON 목록으로 출력, 죽은 세션 파일은 삭제
 SCAN = r'''
-import glob, json, os, time
+import glob, json, os, subprocess, time
 out = []
+titles = {}  # Orca 터미널 탭 제목
+try:
+    r = subprocess.run(["orca", "terminal", "list", "--json"], capture_output=True, text=True, timeout=5,
+                       env={**os.environ, "PATH": "/usr/local/bin:/opt/homebrew/bin:" + os.environ.get("PATH", "")})
+    titles = {t["handle"]: t.get("title") or "" for t in json.loads(r.stdout)["result"]["terminals"]}
+except Exception:
+    pass
 for p in glob.glob(os.path.expanduser("%s/*.json")):
     try:
         d = json.load(open(p))
@@ -34,6 +42,7 @@ for p in glob.glob(os.path.expanduser("%s/*.json")):
         if not alive or time.time() - d.get("updated", 0) > %d:
             os.remove(p)
             continue
+        d["orca_title"] = titles.get(d.get("orca_terminal"), "")
         out.append(d)
     except Exception:
         pass
@@ -58,6 +67,13 @@ def _scan(host: str | None) -> list[dict]:
     return items
 
 
+def _detail(d: dict) -> str:
+    """모델 · 컨텍스트 (예: 'Opus 5.5 · 165k')."""
+    m = d.get("model") or ("Codex" if d.get("agent") == "codex" else "")
+    m = re.sub(r"^claude-(\w+)-(\d+)-(\d+).*", lambda x: f"{x[1].title()} {x[2]}.{x[3]}", m)
+    return f"{m} · {d['ctx'] // 1000}k" if d.get("ctx") else m
+
+
 def state(hosts: list[str | None]) -> StudioState:
     items = [d for h in hosts for d in _scan(h)]
     groups: dict[str, Workspace] = {}
@@ -67,8 +83,13 @@ def state(hosts: list[str | None]) -> StudioState:
         name = d.get("project") or "?"
         if not local:
             name = f"{name} · {d.get('host', d['_ssh'])}"
-        ws = groups.setdefault(name, Workspace(name, space_id=None))
         term = f"{d.get('_ssh') or 'local'}:{d['id']}"
+        if d.get("orca_terminal") and d.get("top", True):  # Orca 세션은 세션마다 한 칸
+            ws = groups.setdefault(term, Workspace(term, space_id=None, header=name,
+                                                   label=d.get("orca_title") or d.get("session", "")[:8],
+                                                   detail=_detail(d)))
+        else:
+            ws = groups.setdefault(name, Workspace(name, space_id=None))
         _sessions[term] = d
         ws.add(term, d.get("agent"), d.get("status"), bool(d.get("top", True)))
     # 알림·작업 중인 프로젝트를 앞쪽에 (같은 상태면 이름순)
@@ -120,6 +141,12 @@ end tell''')
   end repeat
 end tell''')
         return True
+    if d.get("orca_terminal"):  # Orca: 앱을 앞으로 + 그 터미널 탭으로
+        subprocess.run(["open", "-b", bundle or "com.stablyai.orca"], timeout=10)
+        r = subprocess.run(["orca", "terminal", "switch", "--terminal", d["orca_terminal"]],
+                           capture_output=True, timeout=10, env={**os.environ, "PATH": "/usr/local/bin:/opt/homebrew/bin:" + os.environ.get("PATH", "")})
+        if r.returncode == 0:
+            return True
     if bundle and cwd and ("VSCode" in bundle or "vscodium" in bundle.lower() or "cursor" in bundle.lower()
                            or bundle.startswith("com.todesktop.")):
         subprocess.run(["open", "-b", bundle, cwd], timeout=10)  # 그 프로젝트 창으로

@@ -69,5 +69,6 @@
   "sound": {"enabled": false, "volume": 0.6},
   "parcels": {"enabled": false},
   "flow": {"enabled": false},
-  "higgsfield": {"enabled": false}
+  "higgsfield": {"enabled": false},
+  "round": {"projects": []}
 }

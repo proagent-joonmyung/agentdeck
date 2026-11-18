@@ -58,6 +58,9 @@ class Workspace:
     term_tab: dict[str, str] = field(default_factory=dict)  # 터미널 -> 탭 id
     tab_names: dict[str, str] = field(default_factory=dict)  # 탭 id -> 이름
     members: list[Member] = field(default_factory=list)
+    header: str = ""  # 세션 한 칸(Orca)일 때: 위 줄 프로젝트
+    label: str = ""  # 세션 한 칸일 때: 큰 글씨 (탭 제목)
+    detail: str = ""  # 세션 한 칸일 때: 모델 · 컨텍스트
 
     def state_of(self, term: str) -> str:
         """확인(ack) 반영된 표시 상태: attention / done / working / idle."""

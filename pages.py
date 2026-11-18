@@ -208,6 +208,16 @@ def _alert_tile(header: str, title: str, sub: str, color: str, blink_on: bool, t
 
 def studio_tile(w: Workspace, blink_on: bool, header: str | None = None, theme: dict = STUDIO_THEME) -> Button:
     """스튜디오 한 칸: 알림(결정/완료) 깜빡임 + 실행 중 에이전트 수."""
+    if w.label:  # Orca 세션 한 칸: 프로젝트 / 탭 제목 / 상태 · 모델 · 컨텍스트
+        word = "결정" if w.attention else "완료" if w.done else "작업 중" if w.working else "대기"
+        sub = f"{word} · {w.detail}" if w.detail else word
+        if w.attention:
+            return _alert_tile(w.header, w.label, sub, YELLOW, blink_on, theme, True)
+        if w.done:
+            return _alert_tile(w.header, w.label, sub, GREEN, blink_on, theme, True)
+        color = theme["accent"] if w.working else theme["idle"]
+        return Button(header=w.header, raw_header=True, title=w.label, sub=sub, bg=theme["bg"], accent=color,
+                      border=theme["accent"] if w.working else None)
     raw = header is None  # 스튜디오 이름(사용자 데이터)은 번역하지 않음
     header = header or w.name.replace(" · 스튜디오", "")
     # 아래 줄: 에이전트 종류별 개수(C=Claude, X=Codex, A=agy) + 지금 실행 중인 수
@@ -502,3 +512,21 @@ def page_market(view: str, quotes) -> dict[int, Button]:
         p[i] = Button(header=q.name, raw_header=True, header_fg="#ffffff", title=title, sub=sub,
                       bg=heat_color(q.change, 1.5 if q.value is not None else 6.0), fg="#ffffff")
     return p
+
+
+def page_round(stats, host_names: dict[str, str], blink_on: bool) -> dict[int, Button]:
+    """라운드 하네스: 프로젝트 × 머신 한 칸씩. 답할 것(attention)이 있으면 깜빡임."""
+    body = {i: Button(bg=BG) for i in range(10)}
+    for i, s in enumerate(stats[:10]):
+        header = f"{s.name} · {host_names.get(s.host, s.host)}"
+        if not s.ok:
+            body[i] = Button(header=header, raw_header=True, title="?", sub="읽기 실패", bg=BG, accent=DIM)
+        elif s.attention:
+            body[i] = _alert_tile(header, f"답 {s.attention}", f"미정산 {s.inflight}", YELLOW, blink_on, raw=True)
+        elif s.alive:
+            body[i] = Button(header=header, raw_header=True, title="도는 중", sub=f"미정산 {s.inflight}",
+                             bg=BG, accent=GREEN, border=GREEN)
+        else:
+            body[i] = Button(header=header, raw_header=True, title="쉼",
+                             sub=f"미정산 {s.inflight}" if s.inflight else "", bg=BG, accent=DIM)
+    return body

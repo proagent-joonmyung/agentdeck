@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import io
 import json
@@ -20,6 +21,8 @@ from typing import Callable
 
 import hid
 from PIL import Image, ImageDraw, ImageFont
+
+from config import CFG
 
 VID, PID = 0x2207, 0x0019
 PACKET = 1024
@@ -37,6 +40,7 @@ SMALL_BACKGROUND = 2  # 작은 창 모드: 배경 이미지
 IN_BUTTON = 0x0101
 IN_DEVICE_INFO = 0x0303
 
+DISPLAY_GAMMA = float(CFG.get("display_gamma", 1))
 FONT_PATH = "/System/Library/Fonts/AppleSDGothicNeo.ttc"  # 한글 지원
 
 
@@ -163,6 +167,21 @@ def _payload_safe(payload: bytes) -> bool:
     return all(payload[i] not in (0x00, 0x7C) for i in range(PACKET - HEADER, len(payload), PACKET))
 
 
+@functools.lru_cache(maxsize=512)
+def _lift(png: bytes) -> bytes:
+    """config display_gamma (<1 = 밝게): 어두운 테마가 장치에서 어둡게 보여 감마로 들어 올린다. 1 이면 그대로."""
+    if DISPLAY_GAMMA == 1:
+        return png
+    img = Image.open(io.BytesIO(png))
+    if img.mode not in ("RGB", "RGBA", "L"):
+        img = img.convert("RGBA")
+    lut = [round(255 * (i / 255) ** DISPLAY_GAMMA) for i in range(256)]
+    img = img.point(lut * (len(img.getbands())))
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+
 def build_zip(buttons: dict[int, Button], small_png: bytes | None = None) -> bytes:
     """manifest.json + 아이콘 PNG 를 ZIP 으로 묶는다 (펌웨어 버그 회피 포함).
 
@@ -172,12 +191,13 @@ def build_zip(buttons: dict[int, Button], small_png: bytes | None = None) -> byt
     manifest: dict[str, dict] = {}
     for idx, btn in buttons.items():
         col, row = idx % COLS, idx // COLS
-        png = render_icon(btn)
+        png = _lift(render_icon(btn))
         # 장치가 파일명으로 아이콘을 캐시하므로 내용 해시를 이름에 넣어 바뀐 아이콘만 새로 그리게 한다
         name = f"Images/{hashlib.sha1(png).hexdigest()[:16]}.png"
         icons[name] = png
         manifest[f"{col}_{row}"] = {"State": 0, "ViewParam": [{"Icon": name, "Text": ""}]}
     if small_png:
+        small_png = _lift(small_png)
         name = f"Images/{hashlib.sha1(small_png).hexdigest()[:16]}.png"
         icons[name] = small_png
         manifest["3_2"] = {"State": 0, "SmallViewMode": SMALL_BACKGROUND, "ViewParam": [{"Icon": name, "Text": ""}]}

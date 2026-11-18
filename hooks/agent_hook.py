@@ -68,6 +68,25 @@ def _project(cwd: str) -> str:
     return os.path.basename(cwd.rstrip("/")) or cwd
 
 
+def _usage(path: str) -> dict:
+    """대화 기록 끝부분에서 마지막 모델과 컨텍스트 토큰 수 (입력 + 캐시)."""
+    try:
+        with open(path, "rb") as fp:
+            fp.seek(max(0, os.path.getsize(path) - 256 * 1024))
+            lines = fp.read().decode("utf-8", "ignore").splitlines()
+        for line in reversed(lines):
+            if '"usage"' not in line:
+                continue
+            m = json.loads(line).get("message") or {}
+            u = m.get("usage") or {}
+            if m.get("model") and u:
+                return {"model": m["model"], "ctx": u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0)
+                        + u.get("cache_creation_input_tokens", 0)}
+    except Exception:
+        pass
+    return {}
+
+
 def _write(rec: dict) -> None:
     os.makedirs(DIR, exist_ok=True)
     path = os.path.join(DIR, rec["id"].replace("/", "_") + ".json")
@@ -97,6 +116,7 @@ def _base(agent: str, session: str, cwd: str) -> dict:
         "tty": _ps(ppid, "tty"),
         "term_program": os.environ.get("TERM_PROGRAM", ""),
         "bundle": os.environ.get("__CFBundleIdentifier", ""),  # 실행 앱 (VS Code, Cursor, iTerm…)
+        "orca_terminal": os.environ.get("ORCA_TERMINAL_HANDLE", ""),  # Orca 터미널 탭 (누르면 그 탭으로)
         # 다른 프로그램이 띄운 비대화형 실행(-p/--print, exec)은 하위 작업으로 본다
         "top": not any(f in f" {args} " for f in (" -p ", " --print ", " exec ")),
         "updated": time.time(),
@@ -122,7 +142,7 @@ def claude() -> None:
     if not status:
         return
     rec = _base("claude-code", session, d.get("cwd") or os.getcwd())
-    rec.update(status=status, event=ev)
+    rec.update(status=status, event=ev, **_usage(d.get("transcript_path") or ""))
     _write(rec)
 
 
