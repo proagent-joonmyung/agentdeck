@@ -21,11 +21,12 @@ SCAN = r'''
 for r in %s; do
   o="$HOME/$r/.orca"; p=$(cat "$o/round.wait.pid" 2>/dev/null)
   alive=0; [ -n "$p" ] && kill -0 "$p" 2>/dev/null && alive=1
-  inflight=$(ST="$(cat "$o/round.settled" 2>/dev/null)" awk -F'\t' \
-    'BEGIN{n=split(ENVIRON["ST"],a,"\n"); for(i=1;i<=n;i++) s[a[i]]=1} $4!="-" && $4!="" && !($4 in s)' \
-    "$o/round.tsv" 2>/dev/null | wc -l | tr -d ' ')
+  issues=$(ST="$(cat "$o/round.settled" 2>/dev/null)" awk -F'\t' \
+    'BEGIN{n=split(ENVIRON["ST"],a,"\n"); for(i=1;i<=n;i++) s[a[i]]=1} $4!="-" && $4!="" && !($4 in s) {print $4}' \
+    "$o/round.tsv" 2>/dev/null | paste -sd, -)
   att=$(cat "$o/round.attention" 2>/dev/null | wc -l | tr -d ' ')
-  echo "$r $alive ${inflight:-0} ${att:-0}"
+  cap=$(tr -dc 0-9 < "$o/round.cap" 2>/dev/null)
+  echo "$r $alive ${att:-0} ${cap:-0} ${issues:--}"
 done
 '''
 
@@ -36,17 +37,23 @@ class RoundStatus:
     host: str
     ok: bool = False  # 읽기 성공
     alive: bool = False
-    inflight: int = 0
     attention: int = 0
+    cap: int = 0  # 동시에 돌릴 수 있는 슬롯 수 (round.cap)
+    issues: tuple[str, ...] = ()  # 미정산 티켓의 이슈 번호
+
+    @property
+    def inflight(self) -> int:
+        return len(self.issues)
 
 
-def _scan(host: str, roots: list[str]) -> dict[str, tuple[bool, int, int]]:
+def _scan(host: str, roots: list[str]) -> dict[str, tuple]:
     out = _ssh(host, SCAN % " ".join(json.dumps(r) for r in roots), 20).stdout
     res = {}
     for line in out.splitlines():
-        parts = line.rsplit(" ", 3)
-        if len(parts) == 4:
-            res[parts[0]] = (parts[1] == "1", int(parts[2]), int(parts[3]))
+        parts = line.rsplit(" ", 4)
+        if len(parts) == 5:
+            r, alive, att, cap, issues = parts
+            res[r] = (alive == "1", int(att), int(cap), tuple(i for i in issues.split(",") if i != "-"))
     return res
 
 
@@ -65,7 +72,7 @@ def collect() -> list[RoundStatus]:
             got = None
         s = RoundStatus(p["name"], host)
         if got:
-            s.ok, (s.alive, s.inflight, s.attention) = True, got
+            s.ok, (s.alive, s.attention, s.cap, s.issues) = True, got
         stats.append(s)
     return stats
 

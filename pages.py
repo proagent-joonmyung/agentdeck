@@ -607,19 +607,103 @@ def page_market(view: str, quotes) -> dict[int, Button]:
     return p
 
 
+ROUND_HUES = ["#7dcfff", "#bb9af7", "#9ece6a", "#ff9e64", "#f7768e"]  # 프로젝트마다 한 색 (열 순서)
+ROUND_TRACK = "#2a2e42"  # 빈 슬롯
+
+
+def _mix(a: str, b: str, k: float) -> str:
+    """a 를 b 쪽으로 k 만큼 섞은 색."""
+    pa, pb = (int(a[i:i + 2], 16) for i in (1, 3, 5)), (int(b[i:i + 2], 16) for i in (1, 3, 5))
+    return "#" + "".join(f"{round(x + (y - x) * k):02x}" for x, y in zip(pa, pb))
+
+
+def round_tile(s, machine: str, hue: str, blink_on: bool) -> Button:
+    """라운드 한 칸: 가운데 고리 = 슬롯(cap), 채운 조각 = 도는 티켓. 아래 줄 = 이슈 번호나 상태."""
+    from PIL import Image, ImageDraw, ImageFont
+    import io
+
+    from d200 import FONT_PATH, ICON
+    from i18n import t
+
+    S = 2  # 2배로 그려 줄여서 고리 가장자리를 매끄럽게
+    W = ICON * S
+    alert = s.ok and s.attention > 0
+    bg = YELLOW if alert and blink_on else BG
+    ink = "#16161e" if bg == YELLOW else "#c0caf5"
+    dim = _mix(ink, bg, 0.55)
+    img = Image.new("RGB", (W, W), bg)
+    d = ImageDraw.Draw(img)
+    font = lambda size, w=6: ImageFont.truetype(FONT_PATH, size * S, index=w)
+
+    def fit(text, size, max_w, w=6):
+        while size > 12 and d.textlength(text, font=font(size, w)) > max_w * S:
+            size -= 1
+        return font(size, w)
+
+    head = ink if bg == YELLOW else hue
+    d.text((16 * S, 14 * S), s.name, font=fit(s.name, 26, 110), fill=head, anchor="la")
+    d.text(((ICON - 16) * S, 20 * S), machine, font=fit(machine, 17, 70, 2), fill=dim, anchor="ra")
+
+    cx, cy, r, wd = W / 2, 104 * S, 50 * S, 11 * S
+    box = (cx - r, cy - r, cx + r, cy + r)
+    n = max(s.cap, s.inflight, 1)
+    live = s.inflight if s.ok else 0
+    track = _mix(hue, bg, 0.78) if s.alive and bg == BG else (ROUND_TRACK if bg == BG else dim)  # 루프가 돌면 빈 슬롯도 옅게 물듦
+    on = (ink if bg == YELLOW else YELLOW) if alert else (hue if s.alive else _mix(hue, bg, 0.5))
+    if s.alive and live:  # 도는 중: 채운 조각 뒤에 은은한 빛
+        halo = _mix(hue, bg, 0.82)
+        d.ellipse((box[0] - 7 * S, box[1] - 7 * S, box[2] + 7 * S, box[3] + 7 * S), outline=halo, width=wd + 14 * S)
+    if n <= 12:
+        gap = 7 if n > 1 else 0
+        step = 360 / n
+        for i in range(n):
+            a0 = -90 + i * step + gap / 2
+            d.arc(box, a0, a0 + step - gap, fill=on if i < live else track, width=wd)
+    else:  # 슬롯이 많으면 한 줄 고리에 비율로
+        d.arc(box, 0, 360, fill=track, width=wd)
+        if live:
+            d.arc(box, -90, -90 + 360 * live / n, fill=on, width=wd)
+
+    if not s.ok:
+        big, small = "?", ""
+    elif alert:
+        big, small = str(s.attention), t("답할 것", "to answer")
+    else:
+        big, small = str(live), f"/ {s.cap}" if s.cap else ""
+    d.text((cx, cy - (6 * S if small else 0)), big, font=font(46 if len(big) < 3 else 34), fill=ink, anchor="mm")
+    if small:
+        d.text((cx, cy + 26 * S), small, font=font(15, 2), fill=dim, anchor="mm")
+
+    if not s.ok:
+        foot, fc = t("연결 안 됨", "offline"), RED
+    elif alert:
+        foot, fc = t("눌러서 확인", "check it"), ink
+    elif s.issues:
+        foot = " ".join(f"#{i}" for i in s.issues)
+        fc = ink if s.alive else YELLOW
+        if not s.alive:
+            foot = t("루프 멈춤 ", "loop stopped ") + foot
+    elif s.alive:
+        foot, fc = t("티켓 기다리는 중", "waiting for tickets"), dim
+    else:
+        foot, fc = t("멈춤", "stopped"), dim
+    d.text((cx, 178 * S), foot, font=fit(foot, 19, ICON - 24, 4), fill=fc, anchor="mm")
+
+    if alert and not blink_on:
+        d.rounded_rectangle((2 * S, 2 * S, W - 3 * S, W - 3 * S), 18 * S, outline=YELLOW, width=5 * S)
+    buf = io.BytesIO()
+    img.resize((ICON, ICON), Image.LANCZOS).save(buf, "PNG")
+    return Button(image=buf.getvalue())
+
+
 def page_round(stats, host_names: dict[str, str], blink_on: bool) -> dict[int, Button]:
-    """라운드 하네스: 프로젝트 × 머신 한 칸씩. 답할 것(attention)이 있으면 깜빡임."""
+    """라운드 하네스: 열 = 프로젝트, 줄 = 머신 (config 순서). 답할 것이 있으면 깜빡임."""
     body = {i: Button(bg=BG) for i in range(10)}
-    for i, s in enumerate(stats[:10]):
-        header = f"{s.name} · {host_names.get(s.host, s.host)}"
-        if not s.ok:
-            body[i] = Button(header=header, raw_header=True, title="?", sub="읽기 실패", bg=BG, accent=DIM)
-        elif s.attention:
-            body[i] = _alert_tile(header, f"답 {s.attention}", f"미정산 {s.inflight}", YELLOW, blink_on, raw=True)
-        elif s.alive:
-            body[i] = Button(header=header, raw_header=True, title="도는 중", sub=f"미정산 {s.inflight}",
-                             bg=BG, accent=GREEN, border=GREEN)
-        else:
-            body[i] = Button(header=header, raw_header=True, title="쉼",
-                             sub=f"미정산 {s.inflight}" if s.inflight else "", bg=BG, accent=DIM)
+    names = list(dict.fromkeys(s.name for s in stats))[:5]
+    hosts = list(dict.fromkeys(s.host for s in stats))[:2]
+    for s in stats:
+        if s.name in names and s.host in hosts:
+            col, row = names.index(s.name), hosts.index(s.host)
+            body[row * 5 + col] = round_tile(s, host_names.get(s.host, s.host), ROUND_HUES[col % len(ROUND_HUES)],
+                                             blink_on)
     return body
