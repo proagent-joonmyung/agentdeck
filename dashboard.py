@@ -45,7 +45,7 @@ from remote_agy import agy_quota
 import remote_agy
 from remote_herdr import (TOWER_SPACE, StudioState, TowerMeta, Workspace, alert_keys, apply_ack, focus,
                           studio_state, tower_meta, tower_split, unzoom_pane, zoom_pane)
-from usage import claude_usage, codex_live, codex_usage
+from usage import claude_accounts, claude_usage, codex_live, codex_usage
 
 REFRESH_SEC = 30
 BRIGHTNESS_STEPS = [20, 50, 80, 100]
@@ -97,7 +97,14 @@ def collect_llms(pool: ThreadPoolExecutor) -> list[LLM]:
     codex = LLM("CODEX", "#10a37f", week=lim(xu.primary.used_percent, xu.primary.resets_at, WEEK))
     if xu.secondary.used_percent is not None:
         codex.five = lim(xu.secondary.used_percent, xu.secondary.resets_at, W5)
-    out = [claude]
+    accts = claude_accounts()  # claude-swap 으로 여러 계정을 돌려 쓰면 계정마다 한 열 (지금 쓰는 계정이 맨 앞)
+    if accts:
+        accts.sort(key=lambda a: not a[1])
+        out = [LLM(name, "#d97757" if on else "#a0583f", spare=not on,
+                   five=lim(f.used_percent, f.resets_at, W5), week=lim(w.used_percent, w.resets_at, WEEK))
+               for name, on, f, w in accts]
+    else:
+        out = [claude]
     if Path(f"{Path.home()}/.codex").exists():  # Codex 를 한 번도 안 쓴 맥이면 칸을 빼고 앞으로 당긴다
         out.append(codex)
     if not AGY_HOST:  # agy 주소를 설정하지 않았으면 표시 안 함

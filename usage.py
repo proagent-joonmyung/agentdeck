@@ -176,6 +176,29 @@ def claude_usage(now: datetime | None = None) -> ClaudeUsage:
     return u
 
 
+SWAP_DIR = f"{HOME}/.claude-swap-backup"
+
+
+def claude_accounts() -> list[tuple[str, bool, Window, Window]]:
+    """claude-swap 이 받아 둔 계정별 공식 한도: (이름, 지금 쓰는 계정인지, 5시간, 7일).
+
+    claude-swap 이 없으면 빈 목록 (그때는 statusline 스냅샷 한 계정만 쓴다).
+    """
+    try:
+        seq = json.load(open(f"{SWAP_DIR}/sequence.json"))
+        usage = json.load(open(f"{SWAP_DIR}/cache/usage.json")).get("accounts") or {}
+    except (OSError, ValueError):
+        return []
+    active = str(seq.get("activeAccountNumber"))
+    out = []
+    for n in seq.get("sequence") or []:  # 순환에서 뺀 계정은 표시 안 함
+        good = (usage.get(str(n)) or {}).get("lastGood") or {}
+        out.append((f"CLAUDE{n}", str(n) == active,
+                    _window(good.get("five_hour"), "pct", "resets_at"),
+                    _window(good.get("seven_day"), "pct", "resets_at")))
+    return out
+
+
 def _parse_codex_file(path: str) -> list[tuple]:
     """(ts, last_total_tokens, rate_limits) 목록."""
     out = []

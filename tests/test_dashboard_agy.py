@@ -31,6 +31,7 @@ class DashboardQuotaTests(unittest.TestCase):
              patch.object(self.dashboard.Path, "exists", return_value=True), \
              patch.object(self.dashboard, "agy_quota", return_value=buckets), \
              patch.object(self.dashboard, "claude_usage", return_value=self.claude_type()), \
+             patch.object(self.dashboard, "claude_accounts", return_value=[]), \
              patch.object(self.dashboard, "codex_live", return_value=self.codex_type()), \
              ThreadPoolExecutor(max_workers=2) as pool:
             return self.dashboard.collect_llms(pool)
