@@ -12,3 +12,4 @@ __pycache__/
 refs/
 .moai/
 .DS_Store
+auto-update.log
