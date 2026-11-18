@@ -696,14 +696,16 @@ def round_tile(s, machine: str, hue: str, blink_on: bool) -> Button:
     return Button(image=buf.getvalue())
 
 
-def page_round(stats, host_names: dict[str, str], blink_on: bool) -> dict[int, Button]:
-    """라운드 하네스: 열 = 프로젝트, 줄 = 머신 (config 순서). 답할 것이 있으면 깜빡임."""
-    body = {i: Button(bg=BG) for i in range(10)}
+def round_layout(stats) -> dict[int, object]:
+    """칸 번호 → 라운드 상태. 열 = 프로젝트, 줄 = 머신 (config 순서)."""
     names = list(dict.fromkeys(s.name for s in stats))[:5]
     hosts = list(dict.fromkeys(s.host for s in stats))[:2]
-    for s in stats:
-        if s.name in names and s.host in hosts:
-            col, row = names.index(s.name), hosts.index(s.host)
-            body[row * 5 + col] = round_tile(s, host_names.get(s.host, s.host), ROUND_HUES[col % len(ROUND_HUES)],
-                                             blink_on)
+    return {hosts.index(s.host) * 5 + names.index(s.name): s for s in stats if s.name in names and s.host in hosts}
+
+
+def page_round(stats, host_names: dict[str, str], blink_on: bool) -> dict[int, Button]:
+    """라운드 하네스. 답할 것이 있으면 깜빡임, 누르면 그 프로젝트의 Orca 탭으로."""
+    body = {i: Button(bg=BG) for i in range(10)}
+    for i, s in round_layout(stats).items():
+        body[i] = round_tile(s, host_names.get(s.host, s.host), ROUND_HUES[i % 5 % len(ROUND_HUES)], blink_on)
     return body

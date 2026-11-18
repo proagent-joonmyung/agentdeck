@@ -19,7 +19,7 @@ from clock import render_clock, render_market, render_message, render_timer, ren
 from d200 import D200, SMALL_BACKGROUND, Button, InputEvent
 from machines import MachineStat, machine_stats
 from pages import (LLM, Limit, nav, nav_device, nav_worktrees, page_device, page_grid, page_machines, page_pomodoro,
-                   page_market, page_round, page_studio, page_summary, page_worktrees)
+                   page_market, page_round, round_layout, page_studio, page_summary, page_worktrees)
 import round_status
 import market
 from aquarium import Aquarium
@@ -300,6 +300,8 @@ class Dashboard:
             self.on_worktree_press(ev.index, held)
         elif self.page == 3 and ev.index < 10:
             self.on_studio_press(ev.index)
+        elif self.page == ROUND_PAGE and ev.index < 10:
+            self.on_round_press(ev.index)
         elif self.page == 5 and (ev.index < 10 or ev.index >= 13):  # 넓은 타이머 칸(13·14)도 조작 가능
             self.on_pomodoro_press(ev.index, held)
         elif self.page == 1 and ev.index == 8 and (self.studio.attention or self.studio.done):  # 요약 스튜디오 칸: 알림 있는 곳으로
@@ -455,6 +457,17 @@ class Dashboard:
         self.page = HOME_PAGE
         intro.mark_seen()  # 다음에 켤 때는 이번 이후 바뀐 것만 '새로 바뀐 것'으로
         self.render()
+
+    def on_round_press(self, idx: int) -> None:
+        """라운드 칸: 그 프로젝트의 Orca 탭으로 (30초 안에 다시 누르면 다음 탭)."""
+        s = round_layout(self.rounds).get(idx)
+        if s is None:
+            return
+        key = f"round:{s.name}:{s.host}"
+        name, count, at = self.last_focus
+        step = count + 1 if name == key and time.time() - at < REPEAT_WINDOW else 0
+        self.last_focus = (key, step, time.time())
+        self.pool.submit(round_status.focus, s, step)
 
     def refresh_rounds(self) -> None:
         self.rounds = round_status.collect()
