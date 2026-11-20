@@ -238,7 +238,14 @@ class D200:
     def _write(self, packets: list[bytes]) -> None:
         with self._lock:
             for p in packets:
-                self.dev.write(b"\x00" + p)  # report ID 0 (번호 없는 리포트)
+                try:
+                    ok = self.dev.write(b"\x00" + p) >= 0  # report ID 0 (번호 없는 리포트)
+                except (OSError, ValueError):
+                    ok = False
+                if not ok:  # 잠자기·허브 재연결로 핸들이 죽으면 read 는 조용하고 write 만 실패한다 → 끊김 처리(launchd 재시작)
+                    self.disconnected.set()
+                    self._stop.set()
+                    return
 
     def send(self, cmd: int, data: bytes) -> None:
         self._write([_frame(cmd, len(data), data)])
