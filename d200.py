@@ -384,12 +384,29 @@ def _load_libusb():
 #           진짜 HID(2207:0019)가 안 나온다. USB 리셋을 한 번 보내면 다시 인식되면서 HID 로 올라온다
 #           (2026-11-18 맥북 직결에서 확인. 리셋 호출 자체는 장치가 사라져 NOT_FOUND 를 돌려준다).
 def revive_stuck_device(lib=None, vid: int = STUCK_VID, pid: int = STUCK_PID) -> bool:
-    """디버그 모양으로 멈춘 D200 에 USB 리셋을 보낸다. 리셋을 보냈으면 True."""
+    """디버그 모양으로 멈춘 D200 에 USB 리셋을 보낸다. 리셋을 보냈으면 True.
+
+    lib 을 안 주면 자식 프로세스에서 돌린다: 맥에서 리셋 뒤 libusb_exit 가 영원히 멈출 때가 있다
+    (hotplug 스레드가 darwin_devices_detached 에서 안 끝남, 2026-11-25 덱 읽기 스레드가 이걸로 굳음).
+    """
+    if lib is not None:
+        return _reset_usb(lib, vid, pid)
+    if _load_libusb() is None:
+        return False
+    import subprocess
+    import sys
+
+    code = f"import sys, d200; sys.exit(0 if d200._reset_usb(d200._load_libusb(), {vid}, {pid}) else 1)"
+    try:
+        return subprocess.run([sys.executable, "-c", code], cwd=os.path.dirname(os.path.abspath(__file__)),
+                              capture_output=True, timeout=10).returncode == 0
+    except subprocess.TimeoutExpired:
+        return True  # 리셋은 나갔고 정리(libusb_exit)만 멈춘 것 — 자식은 run 이 죽였다
+
+
+def _reset_usb(lib, vid: int, pid: int) -> bool:
     import ctypes
 
-    lib = lib or _load_libusb()
-    if lib is None:
-        return False
     lib.libusb_open_device_with_vid_pid.restype = ctypes.c_void_p
     lib.libusb_open_device_with_vid_pid.argtypes = [ctypes.c_void_p, ctypes.c_uint16, ctypes.c_uint16]
     lib.libusb_reset_device.argtypes = [ctypes.c_void_p]
