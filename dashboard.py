@@ -16,10 +16,11 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 from clock import render_clock, render_market, render_message, render_timer, render_worktree_summary
-from d200 import D200, SMALL_BACKGROUND, Button, InputEvent
+from d200 import SMALL_BACKGROUND, Button, InputEvent
+from drivers import open_deck
 from machines import MachineStat, machine_stats
-from pages import (LLM, Limit, nav, nav_device, nav_worktrees, page_device, page_grid, page_machines, page_pomodoro,
-                   page_market, page_round, round_layout, page_studio, page_summary, page_worktrees)
+from pages import (LLM, Limit, color_for, nav, nav_device, nav_worktrees, page_device, page_grid, page_machines,
+                   page_pomodoro, page_market, page_round, round_layout, page_studio, page_summary, page_worktrees, pct)
 import round_status
 import market
 from aquarium import Aquarium
@@ -82,8 +83,17 @@ def signature(s: StudioState) -> tuple:
     return (s.online, tuple((w.name, w.working, w.attention, w.done, w.idle) for w in s.workspaces))
 
 
+def _agy_label(name: str) -> str:
+    lower = name.lower()
+    if "gemini" in lower:
+        return "GEM"
+    if any(part in lower for part in ("claude", "gpt", "3p")):
+        return "3P"
+    return "".join(c for c in name if c.isascii() and c.isalnum())[:4].upper() or "GRP"
+
+
 def collect_llms(pool: ThreadPoolExecutor) -> list[LLM]:
-    """Claude(로컬 statusline 스냅샷), Codex(실시간), agy(config 의 agy.host) 한도를 모은다."""
+    """Claude(statusline 스냅샷), Codex(실시간), agy(config 의 agy.host) 한도를 모은다."""
     f_codex = pool.submit(codex_live)
     f_agy = pool.submit(agy_quota)
     cu = claude_usage()
@@ -112,11 +122,30 @@ def collect_llms(pool: ThreadPoolExecutor) -> list[LLM]:
     if not AGY_HOST:  # agy 주소를 설정하지 않았으면 표시 안 함
         return out
     agy = LLM("AGY", "#7aa2f7", login=ag is None and remote_agy.login_needed)
-    for b in ag or []:  # 모델 그룹이 여럿이면 창마다 가장 빠듯한(남은 게 적은) 그룹을 보여준다
-        if b.window == "5h" and (agy.five is None or b.remaining < agy.five.remaining):
-            agy.five = Limit(b.remaining, b.reset, W5)
-        elif b.window == "weekly" and (agy.week is None or b.remaining < agy.week.remaining):
-            agy.week = Limit(b.remaining, b.reset, WEEK)
+    groups: dict[str, dict[str, remote_agy.Bucket | None]] = {}
+    for b in ag or []:
+        group = groups.setdefault(b.group, {"5h": None, "weekly": None})
+        previous = group.get(b.window)
+        if previous is None or b.remaining < previous.remaining:
+            group[b.window] = b
+
+    weekly = [group["weekly"] for group in groups.values() if group["weekly"] is not None]
+    five = min((b for b in ag or [] if b.window == "5h"), key=lambda b: b.remaining, default=None)
+    week = weekly[0] if weekly else None
+    if len(weekly) >= 2:
+        week = max(weekly, key=lambda b: (b.remaining, "gemini" in b.group.lower()))
+        five = groups[week.group]["5h"] or five
+        other = min((b for b in weekly if b is not week), key=lambda b: b.remaining)
+        other_label = _agy_label(other.group)
+        rows = [("5H", five.remaining if five else None),
+                (_agy_label(week.group), week.remaining), (other_label, other.remaining)]
+        agy.bars = [(label, remaining, color_for(remaining), pct(remaining)) for label, remaining in rows]
+        agy.week_note = f"{other_label} {pct(other.remaining)}"
+
+    if five:
+        agy.five = Limit(five.remaining, five.reset, W5)
+    if week:
+        agy.week = Limit(week.remaining, week.reset, WEEK)
     return out + [agy]
 
 
@@ -137,8 +166,10 @@ class LoggingPool(ThreadPoolExecutor):
 
 class Dashboard:
     def __init__(self) -> None:
-        self.deck = D200()
+        # 장치가 없어도 시작하고, 케이블을 뽑았다 꽂으면(다른 컴퓨터로 옮겼다 돌아와도) 이어서 그린다
+        self.deck = open_deck(reconnect=True)
         self.deck.on_event = self.on_event
+        self.deck.on_connect = self.on_reconnect
         self.pool = LoggingPool(max_workers=8)
         self.page = 1
         self.brightness_idx = 3  # 기본 100%
@@ -209,6 +240,13 @@ class Dashboard:
     @property
     def brightness(self) -> int:
         return BRIGHTNESS_STEPS[self.brightness_idx]
+
+    def on_reconnect(self) -> None:
+        """장치가 (다시) 연결됨: 누르던 칸 기록을 버리고 지금 화면을 새로 그린다."""
+        self.pressed_at.clear()
+        self.game_handled.clear()
+        self.last_input = time.time()  # 꽂자마자 화면보호기로 가지 않게
+        self.pool.submit(self.render)
 
     # ---- 입력 ----
     def on_event(self, ev: InputEvent) -> None:
@@ -411,6 +449,8 @@ class Dashboard:
         return items[9:] + [back] if self.home_more else items[:9] + [more]
 
     def render_home(self) -> None:
+        if not self.deck.connected.is_set():
+            return
         if self.home_pick:  # 물멍 / 불멍 고르기: 세로 두 칸짜리 큰 단추 두 개
             body = {i: Button(bg="#101118") for i in range(10)}
             for col, (title, sub, icon, color) in ((0, ("물멍", "어항 · 물소리", "fish", "#7dcfff")),
@@ -448,6 +488,9 @@ class Dashboard:
 
     def play_intro(self) -> None:
         """켜질 때 약 3초 인트로 → 홈. 아무 칸이나 누르면 건너뜀."""
+        if not self.deck.connected.is_set():
+            self.page = HOME_PAGE
+            return
         self.home_notes, self.home_fresh = intro.whats_new(), intro.is_new()
         stamp = Path.home() / ".cache/d200/last_start"
         try:  # 10분 안에 다시 켜졌으면(끊김 뒤 재시작 등) 인트로 없이 바로 홈 — 굳은 장치를 두드리지 않게
@@ -877,6 +920,8 @@ class Dashboard:
         return chips
 
     def render(self) -> None:
+        if not self.deck.connected.is_set():
+            return
         if self.intro_on:
             return
         if self.page == HOME_PAGE:
@@ -1079,7 +1124,7 @@ class Dashboard:
                     self.render()
             self.fetch_now.clear()
         self.deck.close()
-        if self.deck.disconnected.is_set():
+        if self.deck.disconnected.is_set():  # reconnect=False 로 바꿨을 때만
             print(f"{datetime.now():%H:%M:%S} device disconnected, exiting", flush=True)
             raise SystemExit(1)  # launchd KeepAlive 가 재시작
 

@@ -1,5 +1,8 @@
 {
   "ui_lang": "auto",
+  "device": {
+    "driver": "auto"
+  },
   "agent_source": "hooks",
   "hooks": {
     "hosts": [

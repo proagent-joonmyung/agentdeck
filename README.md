@@ -39,7 +39,10 @@ Ulanzi D200을 공식 앱 없이 직접 제어하는 macOS 대시보드
 
 - **Ulanzi Stream Controller D200**: [알리익스프레스 Ulanzi 공식 스토어](https://s.click.aliexpress.com/e/_c30mEPxl)(제휴 링크¹)에서 사거나, [알리익스프레스 검색 결과](https://ko.aliexpress.com/w/wholesale-ulanzi-%EC%8A%A4%ED%8A%B8%EB%A6%BC%EB%8D%B1.html)에서 **최저가나 마음에 드는 판매처**를 골라도 돼요. [Ulanzi 공식 홈페이지](https://www.ulanzi.com/products/stream-deck-d200)도 있어요.
   - ¹ 제휴 링크예요. 이 링크로 사시면 agentdeck을 만드는 콜드바이트가 소정의 수수료를 받고, 가격은 똑같아요.
-  - ⚠️ 상품명에 **D200**이 맞는지 꼭 확인하세요. 이름이 비슷한 **D200X**(노브 포함)와 **D200H**는 다른 모델이라 동작을 확인하지 않았어요.
+  - ⚠️ 상품명에 **D200**이 맞는지 꼭 확인하세요. 이름이 비슷한 **D200X**(노브 포함)는 다른 모델이라 동작을 확인하지 않았어요.
+  - **D200H**도 쓸 수 있어요. `config.json`에 `"device": {"model": "d200h"}`를 넣으세요 (넓은 칸 크기·입력 차이를 맞춰요).
+- **Elgato Stream Deck MK.2 / XL** (실험적 지원, 실기 피드백 환영) · `pip install -r requirements-elgato.txt`로 설치하면 자동 감지해요. 직접 선택하려면 `"device": {"driver": "elgato"}`를 넣으세요. 오른쪽 넓은 타일은 13·14번 키에 나눠 표시해요.
+- **Mirabox StreamDock (293 · 293V3 · 293S · 293SV3) / Ajazz AKP153** (실험적 지원, 실기 피드백 환영) · 추가 패키지 없이 자동 감지해요. 직접 선택하려면 `"device": {"driver": "mirabox", "model": "293s"}`처럼 모델을 지정하세요. 회전과 키 순서는 `scripts/probe_mirabox.py`로 확인해요.
 - macOS(Apple Silicon), Python 3.11 이상
 
 ## 🧩 기능
