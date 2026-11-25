@@ -26,7 +26,7 @@ WIDE = (458, 196)
 WIDE_X = 3 * PITCH
 FW, FH = WIDE_X + WIDE[0], 3 * SIZE + 2 * GAP
 INTRO_SEC = 3.4
-FPS = 6
+FPS = 2  # d200.MIN_FRAME_SEC 와 맞춤
 PALETTE = ["#7aa2f7", "#bb9af7", "#f7768e", "#ff9e64", "#e0af68", "#9ece6a", "#73daca", "#7dcfff", "#2ac3de", "#c0caf5"]
 LETTERS = "AGENTDECK"
 

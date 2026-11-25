@@ -26,6 +26,7 @@ from config import CFG
 from i18n import t
 
 VID, PID = 0x2207, 0x0019
+MIN_FRAME_SEC = 0.5  # 화면 갱신 최소 간격 (초당 2장)
 STUCK_VID, STUCK_PID = 0x18D1, 0xD002  # 바로 꽂았을 때 가끔 이것만 잡힌다 (revive_stuck_device)
 REVIVE_WAIT_S = 6
 PACKET = 1024
@@ -288,6 +289,7 @@ class D200:
         self._stop = threading.Event()
         self.disconnected = threading.Event()
         self._small = "1|0|0|00:00:00|0"
+        self._last_frame = 0.0
         self.on_event: Callable[[InputEvent], None] | None = None
         self.on_info: Callable[[str], None] | None = None
 
@@ -317,6 +319,12 @@ class D200:
 
     def set_buttons(self, buttons: dict[int, Button], partial: bool = False, small_png: bytes | None = None) -> None:
         payload = build_zip(buttons, small_png)
+        # 덱은 새 그림을 1초에 1~2장만 받아들인다. 더 보내면 밀리다가 펌웨어가 굳어(쓰기 거부) 케이블을 다시 꽂아야 한다.
+        # 모든 화면 갱신(어항·인트로·게임 포함)을 여기서 최소 간격으로 묶는다.
+        wait = self._last_frame + MIN_FRAME_SEC - time.time()
+        if wait > 0:
+            time.sleep(wait)
+        self._last_frame = time.time()
         cmd = CMD_PARTIAL_UPDATE if partial else CMD_SET_BUTTONS
         first = payload[: PACKET - HEADER]
         packets = [_frame(cmd, len(payload), first)]
@@ -362,7 +370,8 @@ class D200:
         threading.Thread(target=self._keepalive_loop, daemon=True).start()
 
     def close(self) -> None:
-        self._stop.set()
+        with self._lock:  # 보내던 화면(여러 패킷)을 끝까지 보낸 뒤 닫는다 — 중간에 끊으면 장치가 굳을 수 있다
+            self._stop.set()
         time.sleep(0.2)
         self.dev.close()
 

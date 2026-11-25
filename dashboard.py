@@ -65,7 +65,7 @@ PARCEL_PAGE = 8 if PARCELS_ON else -1  # 택배 (게임 다음)
 ROUND_PAGE = 8 + PARCELS_ON if ROUND_ON else -1  # 라운드 하네스 (택배 다음)
 AQUA_PAGE = PAGES  # 어항 (넘김 순서 마지막, 화면보호기로도 사용)
 GAME_TICK = 0.05
-AQUA_FPS = 5
+AQUA_FPS = 2  # d200.MIN_FRAME_SEC 와 맞춤 (덱은 초당 1~2장까지)
 WT_PAGE = 16  # 워크트리: 작업 현황 넓은 칸에서 들어가는 하위 페이지 (넘김 순서 밖)
 PRES_PAGE = 18  # 발표 모드: 홈 바로가기로 들어가는 하위 페이지 (넘김 순서 밖)
 SHORT_PAGE = 19  # 바로가기(포트폴리오): config.json 의 shortcuts 목록 (넘김 순서 밖)
@@ -449,9 +449,17 @@ class Dashboard:
     def play_intro(self) -> None:
         """켜질 때 약 3초 인트로 → 홈. 아무 칸이나 누르면 건너뜀."""
         self.home_notes, self.home_fresh = intro.whats_new(), intro.is_new()
-        self.intro_on, self.intro_skip = True, False
+        stamp = Path.home() / ".cache/d200/last_start"
+        try:  # 10분 안에 다시 켜졌으면(끊김 뒤 재시작 등) 인트로 없이 바로 홈 — 굳은 장치를 두드리지 않게
+            recent = time.time() - stamp.stat().st_mtime < 600
+        except OSError:
+            recent = False
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.touch()
+        self.intro_on, self.intro_skip = True, recent
         sub = intro.version_text()
-        play("intro")
+        if not recent:
+            play("intro")
         t0 = time.time()
         try:
             while not self.intro_skip and time.time() - t0 < intro.INTRO_SEC:
