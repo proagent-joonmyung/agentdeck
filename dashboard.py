@@ -193,6 +193,7 @@ class Dashboard:
         self.zoomed_pane: str | None = None  # 대시보드가 확대해 둔 총괄 pane
         self.pomo = Pomodoro.load()
         self.market_view = 0  # market.VIEWS 순서
+        self.market_price = False  # True 면 칸마다 금액을 크게, 등락률을 아래에
         self.aquarium = Aquarium(int(CFG.get("aquarium_fish", 14)))  # 물고기 수 (config)
         self.fireplace = Fireplace()
         self.rain = Rain()
@@ -385,8 +386,12 @@ class Dashboard:
                 self.pool.submit(updater.check, True)
         elif self.page == PARCEL_PAGE and (ev.index < 10 or ev.index >= 13):
             self.on_parcel_press(ev.index, held)
-        elif self.page == 6 and ev.index < 10:  # 히트맵 칸: HeatTab 새 탭
-            self.pool.submit(market.open_heattab)
+        elif self.page == 6 and ev.index < 10:  # 히트맵 칸: 짧게 = 등락률↔금액 크게, 길게 = HeatTab 새 탭
+            if held >= LONG_PRESS:
+                self.pool.submit(market.open_heattab)
+            else:
+                self.market_price = not self.market_price
+                self.render()
         elif self.page == 6 and ev.index == 11 and held < LONG_PRESS:  # 히트맵: 가운데 짧게 = 보기 전환
             self.market_view = (self.market_view + 1) % len(market.VIEWS)
             self.market_quotes = None
@@ -981,7 +986,7 @@ class Dashboard:
             elif self.page == 5:
                 body = page_pomodoro(self.pomo, self.blink_on)
             elif self.page == 6:
-                body = page_market(market.VIEWS[self.market_view], self.market_quotes)
+                body = page_market(market.VIEWS[self.market_view], self.market_quotes, self.market_price)
             elif self.page == DEV_PAGE:
                 name, host = MACHINES[self.device_idx][0], MOLE_HOSTS.get(MACHINES[self.device_idx][0])
                 m = next((x for x in self.machines if x.name == name), None)

@@ -294,16 +294,17 @@ def _payload_safe(payload: bytes) -> bool:
 
 @functools.lru_cache(maxsize=512)
 def _lift(png: bytes) -> bytes:
-    """config display_gamma (<1 = 밝게): 어두운 테마가 장치에서 어둡게 보여 감마로 들어 올린다. 1 이면 그대로."""
-    if DISPLAY_GAMMA == 1:
-        return png
-    img = Image.open(io.BytesIO(png))
-    if img.mode not in ("RGB", "RGBA", "L"):
-        img = img.convert("RGBA")
-    lut = [round(255 * (i / 255) ** DISPLAY_GAMMA) for i in range(256)]
-    img = img.point(lut * (len(img.getbands())))
+    """장치로 보내기 전 손질: config display_gamma (<1 = 밝게) 감마를 올리고 256색 팔레트로 줄인다.
+
+    팔레트로 줄이면 색 배경 칸(주식 히트맵)이 6.7KB → 2KB 대로 준다. 한 화면이 80KB 넘게 되면
+    덱이 끊겼다 붙었다 했다 (2026-11-27 주식 화면에서 사용자 확인).
+    """
+    img = Image.open(io.BytesIO(png)).convert("RGB")
+    if DISPLAY_GAMMA != 1:
+        lut = [round(255 * (i / 255) ** DISPLAY_GAMMA) for i in range(256)]
+        img = img.point(lut * 3)
     buf = io.BytesIO()
-    img.save(buf, "PNG")
+    img.quantize(256).save(buf, "PNG", optimize=True)
     return buf.getvalue()
 
 
@@ -483,6 +484,7 @@ class D200:
         self._wedged = False  # 장치는 보이는데 쓰기를 거부함 (펌웨어가 굳음) → 읽기 스레드가 USB 리셋
         self._last_wedge_reset = 0.0
         self._last_frame = 0.0
+        self._pace = threading.Lock()  # 여러 스레드가 동시에 그려도 프레임 간격을 지키게
         self.disconnected = threading.Event()  # reconnect=False 에서만 켜진다 (멈춤 신호)
         self.connected = threading.Event()  # 지금 장치가 열려 있는지
         self._brightness: int | None = None  # 다시 연결할 때 복원
@@ -594,18 +596,21 @@ class D200:
             return  # 끊겨 있는 동안은 그리지 않는다 (애니메이션이 헛도는 CPU 를 아낌). 다시 연결되면 on_connect 에서 새로 그림
         p = self.profile
         payload = build_zip(buttons, small_png, p.wide_size, p.wide_action, p.wide_view_mode)
-        wait = self._last_frame + MIN_FRAME_SEC - time.monotonic()  # 어항·인트로·게임 포함 모든 화면 갱신을 초당 2장 이하로
-        if wait > 0:
-            time.sleep(wait)
-        self._last_frame = time.monotonic()
         partial = partial and self.profile.partial_updates
         cmd = CMD_PARTIAL_UPDATE if partial else CMD_SET_BUTTONS
         first = payload[: PACKET - HEADER]
         packets = [_frame(cmd, len(payload), first)]
         for off in range(PACKET - HEADER, len(payload), PACKET):
             packets.append(payload[off : off + PACKET].ljust(PACKET, b"\x00"))
-        # 부분 갱신은 화면 일부라서 재전송용으로 기억하지 않는다
-        self._write(packets, remember=not partial)
+        # 어항·인트로·게임 포함 모든 화면 갱신을 초당 2장 이하로. 시세 스레드와 메인 루프가 겹쳐도
+        # 앞 화면을 다 보낸 뒤부터 간격을 잰다
+        with self._pace:
+            wait = self._last_frame + MIN_FRAME_SEC - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)
+            # 부분 갱신은 화면 일부라서 재전송용으로 기억하지 않는다
+            self._write(packets, remember=not partial)
+            self._last_frame = time.monotonic()
 
     def _resend_buttons(self) -> None:
         # 기억한 패킷을 꺼내는 것과 보내는 것을 한 잠금 안에서 해서, 그 사이 새 화면이 나가도 옛 화면으로 덮지 않는다

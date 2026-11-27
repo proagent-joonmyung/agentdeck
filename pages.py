@@ -587,7 +587,7 @@ def heat_color(change: float | None, scale: float = 6.0) -> str:
     return "#%02x%02x%02x" % tuple(int(b + (c - b) * t) for b, c in zip(base, tint))
 
 
-def page_market(view: str, quotes) -> dict[int, Button]:
+def page_market(view: str, quotes, show_price: bool = False) -> dict[int, Button]:
     from market import VIEW_LABEL
 
     p: dict[int, Button] = {i: Button(bg=BG) for i in range(10)}
@@ -602,6 +602,8 @@ def page_market(view: str, quotes) -> dict[int, Button]:
             title, sub = q.value, q.note or ""
         else:
             title, sub = ("-" if q.change is None else f"{q.change:+.2f}%"), q.price
+        if show_price and sub:  # 누를 때마다 큰 글씨와 아래 줄을 맞바꾼다
+            title, sub = sub, title
         p[i] = Button(header=q.name, raw_header=True, header_fg="#ffffff", title=title, sub=sub,
                       bg=heat_color(q.change, 1.5 if q.value is not None else 6.0), fg="#ffffff")
     return p
